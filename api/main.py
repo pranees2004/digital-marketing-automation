@@ -3,6 +3,8 @@ FastAPI Application — Digital Marketing Automation System
 Stable app entrypoint with responsive frontend and v1 API router integration.
 """
 
+import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -11,7 +13,7 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.routes import router as v1_router
 from config.settings import config
@@ -33,9 +35,11 @@ try:
 except Exception as exc:
     logger.warning(f"⚠️ Claude client init failed: {exc} — running in MOCK MODE")
 
+# Non-persistent demo storage (resets on restart); use a database in production.
 company_profiles: List[Dict[str, Any]] = []
 social_connections: List[Dict[str, Any]] = []
 scheduled_posts: List[Dict[str, Any]] = []
+store_lock = asyncio.Lock()
 
 
 @asynccontextmanager
@@ -83,6 +87,13 @@ class ScheduledPostRequest(BaseModel):
     platform: Literal["instagram", "facebook", "linkedin", "twitter"]
     content: str = Field(..., min_length=10)
     scheduled_for: datetime
+
+    @field_validator("scheduled_for")
+    @classmethod
+    def ensure_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+            raise ValueError("scheduled_for must include timezone information")
+        return value
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -197,15 +208,25 @@ async def root():
     async function refreshConnections() {{
       const res = await fetch('/api/v1/frontend/social/connections');
       const data = await res.json();
-      document.getElementById('connections').innerHTML = (data.data || [])
-        .map(c => `<li>${{c.platform}} → ${{c.account_name}} (${{c.status}})</li>`).join('');
+      const list = document.getElementById('connections');
+      list.innerHTML = '';
+      (data.data || []).forEach(c => {{
+        const li = document.createElement('li');
+        li.textContent = `${{c.platform}} → ${{c.account_name}} (${{c.status}})`;
+        list.appendChild(li);
+      }});
     }}
 
     async function refreshScheduledPosts() {{
       const res = await fetch('/api/v1/frontend/social/scheduled');
       const data = await res.json();
-      document.getElementById('scheduledPosts').innerHTML = (data.data || [])
-        .map(p => `<li>${{p.platform}} | ${{new Date(p.scheduled_for).toLocaleString()}} | ${{p.content.slice(0, 80)}}...</li>`).join('');
+      const list = document.getElementById('scheduledPosts');
+      list.innerHTML = '';
+      (data.data || []).forEach(p => {{
+        const li = document.createElement('li');
+        li.textContent = `${{p.platform}} | ${{new Date(p.scheduled_for).toLocaleString()}} | ${{p.content.slice(0, 80)}}...`;
+        list.appendChild(li);
+      }});
     }}
 
     document.getElementById('companyForm').addEventListener('submit', async (e) => {{
@@ -291,7 +312,12 @@ Audience: {request.target_audience}
 
 Return JSON with keys: positioning, seo_focus, social_focus, email_focus."""
         try:
-            recommendations = claude._call_claude_json(prompt)
+            raw_recommendations = await claude.generate(
+                f"{prompt}\nRespond with valid JSON only."
+            )
+            recommendations = json.loads(raw_recommendations)
+        except json.JSONDecodeError as exc:
+            logger.warning(f"AI response parsing failed, returning fallback plan: {exc}")
         except Exception as exc:
             logger.warning(f"AI recommendations failed, returning fallback plan: {exc}")
 
@@ -302,17 +328,19 @@ Return JSON with keys: positioning, seo_focus, social_focus, email_focus."""
         "industry": request.industry,
         "target_audience": request.target_audience,
         "recommendations": recommendations,
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    company_profiles.append(profile)
+    async with store_lock:
+        company_profiles.append(profile)
     return {"status": "success", "message": "Company profile captured and strategy generated", "data": profile}
 
 
 @app.get("/api/v1/frontend/company-profile")
 async def get_company_profile():
-    if not company_profiles:
-        return {"status": "success", "data": None}
-    return {"status": "success", "data": company_profiles[-1]}
+    async with store_lock:
+        if not company_profiles:
+            return {"status": "success", "data": None}
+        return {"status": "success", "data": company_profiles[-1]}
 
 
 @app.post("/api/v1/frontend/social/connect")
@@ -321,27 +349,32 @@ async def connect_social_platform(request: SocialConnectionRequest):
         "platform": request.platform,
         "account_name": request.account_name,
         "status": "connected",
-        "connected_at": datetime.utcnow().isoformat(),
+        "connected_at": datetime.now(timezone.utc).isoformat(),
     }
-    social_connections.append(connection)
+    async with store_lock:
+        social_connections.append(connection)
     return {"status": "success", "message": f"{request.platform} connected", "data": connection}
 
 
 @app.get("/api/v1/frontend/social/connections")
 async def list_social_connections():
-    return {"status": "success", "data": social_connections}
+    async with store_lock:
+        return {"status": "success", "data": list(social_connections)}
 
 
 @app.post("/api/v1/frontend/social/schedule")
 async def schedule_social_post(request: ScheduledPostRequest):
     scheduled_for_utc = request.scheduled_for.astimezone(timezone.utc)
-    if scheduled_for_utc <= datetime.now(timezone.utc):
+    now_utc = datetime.now(timezone.utc)
+    if scheduled_for_utc < now_utc:
         raise HTTPException(status_code=400, detail="scheduled_for must be a future date/time")
 
-    if not any(
-        connection["platform"] == request.platform and connection["status"] == "connected"
-        for connection in social_connections
-    ):
+    async with store_lock:
+        platform_connected = any(
+            connection["platform"] == request.platform and connection["status"] == "connected"
+            for connection in social_connections
+        )
+    if not platform_connected:
         raise HTTPException(
             status_code=400,
             detail=f"{request.platform} is not connected. Connect it first.",
@@ -354,13 +387,16 @@ async def schedule_social_post(request: ScheduledPostRequest):
         "status": "scheduled",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    scheduled_posts.append(scheduled_post)
+    async with store_lock:
+        scheduled_posts.append(scheduled_post)
     return {"status": "success", "message": "Post scheduled successfully", "data": scheduled_post}
 
 
 @app.get("/api/v1/frontend/social/scheduled")
 async def list_scheduled_posts():
-    return {"status": "success", "data": sorted(scheduled_posts, key=lambda p: p["scheduled_for"])}
+    async with store_lock:
+        posts = sorted(scheduled_posts, key=lambda p: p["scheduled_for"])
+    return {"status": "success", "data": posts}
 
 
 if __name__ == "__main__":
