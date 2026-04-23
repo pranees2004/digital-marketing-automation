@@ -1,55 +1,115 @@
 """
-FastAPI Server — Digital Marketing Automation API
-Main application entry point for the REST API
+FastAPI Application — Digital Marketing Automation System
+Main entry point for the REST API server.
 """
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+from datetime import datetime
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from contextlib import asynccontextmanager
-import logging
-import sys
-import os
+from fastapi.responses import HTMLResponse, JSONResponse
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config.settings import config
+from core.claude_client import ClaudeClient
+from modules.content_engine import ContentEngine
+from modules.seo_optimizer import SEOOptimizer
+from modules.social_media_manager import SocialMediaManager
+from modules.email_automation import EmailAutomation
+from modules.ad_campaign_manager import AdCampaignManager
+from modules.analytics_engine import AnalyticsEngine
+from modules.reporting import ReportGenerator
+from workflows.daily_workflow import DailyWorkflow
+from workflows.weekly_workflow import WeeklyWorkflow
+from workflows.monthly_workflow import MonthlyWorkflow
 
-from api.routes import router
-
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 logger = logging.getLogger(__name__)
 
+# ===== Initialize Services =====
+claude = None
+try:
+    if config.claude.api_key and config.claude.api_key != "sk-ant-your-api-key-here":
+        claude = ClaudeClient(config.claude)
+        logger.info("✅ Claude AI client initialized")
+    else:
+        logger.warning("⚠️ Claude API key not set — running in MOCK MODE")
+except Exception as e:
+    logger.warning(f"⚠️ Claude client init failed: {e} — running in MOCK MODE")
 
+# Initialize all modules
+content_engine = ContentEngine(claude_client=claude, config=config)
+seo_optimizer = SEOOptimizer(claude_client=claude, config=config)
+social_manager = SocialMediaManager(claude_client=claude, config=config)
+email_automation = EmailAutomation(claude_client=claude, config=config)
+ad_manager = AdCampaignManager(claude_client=claude, config=config)
+analytics_engine = AnalyticsEngine(claude_client=claude, config=config)
+report_generator = ReportGenerator(
+    claude_client=claude, analytics_engine=analytics_engine, config=config
+)
+
+# Initialize workflows
+daily_workflow = DailyWorkflow(
+    claude_client=claude,
+    content_engine=content_engine,
+    social_manager=social_manager,
+    email_automation=email_automation,
+    ad_manager=ad_manager,
+    analytics_engine=analytics_engine,
+    report_generator=report_generator,
+    config=config,
+)
+
+weekly_workflow = WeeklyWorkflow(
+    claude_client=claude,
+    content_engine=content_engine,
+    social_manager=social_manager,
+    email_automation=email_automation,
+    ad_manager=ad_manager,
+    analytics_engine=analytics_engine,
+    report_generator=report_generator,
+    seo_optimizer=seo_optimizer,
+    config=config,
+)
+
+monthly_workflow = MonthlyWorkflow(
+    claude_client=claude,
+    content_engine=content_engine,
+    social_manager=social_manager,
+    email_automation=email_automation,
+    ad_manager=ad_manager,
+    analytics_engine=analytics_engine,
+    report_generator=report_generator,
+    seo_optimizer=seo_optimizer,
+    config=config,
+)
+
+
+# ===== FastAPI App =====
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown events"""
     logger.info("🚀 Digital Marketing Automation API starting up...")
-    logger.info("📊 Initializing modules...")
+    logger.info(f"   Company: {config.company.name}")
+    logger.info(f"   Industry: {config.company.industry}")
+    logger.info(f"   Mock Mode: {claude is None}")
     yield
-    logger.info("👋 Shutting down Digital Marketing Automation API")
+    logger.info("👋 Digital Marketing Automation API shutting down...")
 
 
 app = FastAPI(
     title="Digital Marketing Automation API",
-    description="""
-    ## 🚀 Complete Digital Marketing Automation System
-    
-    Powered by **Claude AI (Anthropic)** + **Azure Cloud**
-    
-    ### Features:
-    - 📝 **Content Generation** — Blog posts, social media content, ad copy
-    - 🔍 **SEO Optimization** — Keyword research, content optimization, audits
-    - 📱 **Social Media Management** — Multi-platform scheduling & posting
-    - 📧 **Email Automation** — Campaign creation, sequences, A/B testing
-    - 📊 **Analytics & Reporting** — Performance tracking & insights
-    - 🎯 **Ad Campaign Management** — Google Ads & Meta Ads automation
-    - 🔄 **Automated Workflows** — Daily, weekly, monthly marketing tasks
-    """,
+    description="Complete marketing automation system powered by Claude AI + Azure",
     version="1.0.0",
     lifespan=lifespan,
 )
 
-# CORS — Allow all origins for development
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -58,320 +118,432 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include all routes
-app.include_router(router, prefix="/api/v1")
 
-
+# ===== HEALTH & INFO =====
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """Landing page with dashboard"""
-    return """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>🚀 Digital Marketing Automation</title>
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-                font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; 
-                background: linear-gradient(135deg, #0f0c29, #302b63, #24243e); 
-                color: #fff; 
-                min-height: 100vh;
-            }
-            .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-            
-            header {
-                text-align: center;
-                padding: 40px 0 30px;
-            }
-            header h1 { 
-                font-size: 2.5rem; 
-                background: linear-gradient(90deg, #00d2ff, #3a7bd5, #00d2ff);
-                background-size: 200%;
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                animation: shimmer 3s ease-in-out infinite;
-            }
-            @keyframes shimmer { 0%,100%{background-position:0%} 50%{background-position:100%} }
-            header p { color: #a0a0c0; margin-top: 10px; font-size: 1.1rem; }
-            
-            .status-bar {
-                display: flex;
-                justify-content: center;
-                gap: 30px;
-                margin: 25px 0;
-                flex-wrap: wrap;
-            }
-            .status-item {
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 12px;
-                padding: 15px 25px;
-                text-align: center;
-            }
-            .status-item .dot { 
-                display: inline-block; 
-                width: 10px; height: 10px; 
-                border-radius: 50%; 
-                margin-right: 8px;
-                animation: pulse 2s ease-in-out infinite;
-            }
-            .dot.green { background: #00ff88; box-shadow: 0 0 10px #00ff88; }
-            .dot.yellow { background: #ffd700; box-shadow: 0 0 10px #ffd700; }
-            @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-            
-            .grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-                gap: 20px;
-                margin: 30px 0;
-            }
-            .card {
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 16px;
-                padding: 25px;
-                transition: all 0.3s ease;
-                cursor: pointer;
-                text-decoration: none;
-                color: inherit;
-                display: block;
-            }
-            .card:hover { 
-                transform: translateY(-5px); 
-                border-color: #3a7bd5;
-                box-shadow: 0 10px 40px rgba(58,123,213,0.2);
-            }
-            .card-icon { font-size: 2rem; margin-bottom: 12px; }
-            .card h3 { margin-bottom: 8px; font-size: 1.2rem; }
-            .card p { color: #a0a0c0; font-size: 0.9rem; line-height: 1.5; }
-            .card .endpoint { 
-                margin-top: 12px; 
-                padding: 6px 12px; 
-                background: rgba(58,123,213,0.2); 
-                border-radius: 6px; 
-                font-family: monospace; 
-                font-size: 0.8rem;
-                color: #00d2ff;
-                display: inline-block;
-            }
-            
-            .try-section {
-                background: rgba(255,255,255,0.03);
-                border: 1px solid rgba(255,255,255,0.08);
-                border-radius: 16px;
-                padding: 30px;
-                margin: 30px 0;
-            }
-            .try-section h2 { margin-bottom: 20px; color: #00d2ff; }
-            
-            .form-group { margin-bottom: 15px; }
-            .form-group label { display: block; margin-bottom: 5px; color: #a0a0c0; }
-            .form-group input, .form-group select, .form-group textarea {
-                width: 100%;
-                padding: 12px;
-                border-radius: 8px;
-                border: 1px solid rgba(255,255,255,0.1);
-                background: rgba(0,0,0,0.3);
-                color: #fff;
-                font-size: 1rem;
-            }
-            .form-group textarea { min-height: 80px; resize: vertical; }
-            
-            .btn {
-                padding: 12px 30px;
-                border: none;
-                border-radius: 8px;
-                font-size: 1rem;
-                cursor: pointer;
-                font-weight: 600;
-                transition: all 0.3s ease;
-            }
-            .btn-primary { 
-                background: linear-gradient(90deg, #3a7bd5, #00d2ff); 
-                color: #fff; 
-            }
-            .btn-primary:hover { transform: scale(1.05); box-shadow: 0 5px 20px rgba(58,123,213,0.4); }
-            
-            .result-box {
-                margin-top: 20px;
-                padding: 20px;
-                background: rgba(0,0,0,0.3);
-                border-radius: 12px;
-                border: 1px solid rgba(255,255,255,0.1);
-                white-space: pre-wrap;
-                font-family: monospace;
-                font-size: 0.9rem;
-                display: none;
-                max-height: 400px;
-                overflow-y: auto;
-            }
-            
-            .footer {
-                text-align: center;
-                padding: 30px 0;
-                color: #666;
-                border-top: 1px solid rgba(255,255,255,0.05);
-                margin-top: 40px;
-            }
-            .footer a { color: #3a7bd5; text-decoration: none; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <header>
-                <h1>🚀 Digital Marketing Automation</h1>
-                <p>AI-Powered Marketing Engine — Claude API + Azure Cloud</p>
-            </header>
-            
-            <div class="status-bar">
-                <div class="status-item">
-                    <span class="dot green"></span> API Server: Online
-                </div>
-                <div class="status-item">
-                    <span class="dot green"></span> Claude AI: Connected
-                </div>
-                <div class="status-item">
-                    <span class="dot yellow"></span> Azure: Standby
-                </div>
-            </div>
-            
-            <div class="grid">
-                <a class="card" href="/docs" target="_blank">
-                    <div class="card-icon">📝</div>
-                    <h3>Content Engine</h3>
-                    <p>Generate blog posts, articles, social media content, and ad copy using Claude AI.</p>
-                    <span class="endpoint">POST /api/v1/content/generate</span>
-                </a>
-                
-                <a class="card" href="/docs" target="_blank">
-                    <div class="card-icon">🔍</div>
-                    <h3>SEO Optimizer</h3>
-                    <p>Keyword research, content scoring, meta tag generation, and SEO audits.</p>
-                    <span class="endpoint">POST /api/v1/seo/analyze</span>
-                </a>
-                
-                <a class="card" href="/docs" target="_blank">
-                    <div class="card-icon">📱</div>
-                    <h3>Social Media</h3>
-                    <p>Create & schedule posts across Twitter, LinkedIn, Facebook, and Instagram.</p>
-                    <span class="endpoint">POST /api/v1/social/create</span>
-                </a>
-                
-                <a class="card" href="/docs" target="_blank">
-                    <div class="card-icon">📧</div>
-                    <h3>Email Campaigns</h3>
-                    <p>Automated email sequences, A/B testing, and newsletter generation.</p>
-                    <span class="endpoint">POST /api/v1/email/campaign</span>
-                </a>
-                
-                <a class="card" href="/docs" target="_blank">
-                    <div class="card-icon">🎯</div>
-                    <h3>Ad Campaigns</h3>
-                    <p>Google Ads & Meta Ads copy generation, audience targeting suggestions.</p>
-                    <span class="endpoint">POST /api/v1/ads/generate</span>
-                </a>
-                
-                <a class="card" href="/docs" target="_blank">
-                    <div class="card-icon">📊</div>
-                    <h3>Analytics & Reports</h3>
-                    <p>Performance dashboards, automated weekly/monthly marketing reports.</p>
-                    <span class="endpoint">GET /api/v1/analytics/dashboard</span>
-                </a>
-                
-                <a class="card" href="/docs" target="_blank">
-                    <div class="card-icon">🔄</div>
-                    <h3>Workflows</h3>
-                    <p>Run automated daily, weekly, and monthly marketing workflows.</p>
-                    <span class="endpoint">POST /api/v1/workflows/run</span>
-                </a>
-                
-                <a class="card" href="/docs" target="_blank">
-                    <div class="card-icon">⚡</div>
-                    <h3>API Docs</h3>
-                    <p>Full interactive Swagger documentation for all endpoints.</p>
-                    <span class="endpoint">GET /docs</span>
-                </a>
-            </div>
-            
-            <!-- Quick Try Section -->
-            <div class="try-section">
-                <h2>⚡ Quick Try — Generate Content Now</h2>
-                <div class="form-group">
-                    <label>Content Type</label>
-                    <select id="contentType">
-                        <option value="blog_post">📝 Blog Post</option>
-                        <option value="social_media">📱 Social Media Post</option>
-                        <option value="email">📧 Email Campaign</option>
-                        <option value="ad_copy">🎯 Ad Copy</option>
-                        <option value="seo_meta">🔍 SEO Meta Tags</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>Topic / Keywords</label>
-                    <input type="text" id="topic" placeholder="e.g., AI in digital marketing, SaaS growth hacks..." />
-                </div>
-                <div class="form-group">
-                    <label>Additional Instructions (optional)</label>
-                    <textarea id="instructions" placeholder="e.g., Target audience: startup founders, Tone: casual..."></textarea>
-                </div>
-                <button class="btn btn-primary" onclick="generateContent()">🚀 Generate with Claude AI</button>
-                <div id="resultBox" class="result-box"></div>
-            </div>
-            
-            <div class="footer">
-                <p>Built with ❤️ using <a href="https://anthropic.com">Claude AI</a> + <a href="https://azure.microsoft.com">Azure Cloud</a></p>
-                <p style="margin-top:5px;">📖 <a href="/docs">API Documentation</a> | <a href="/api/v1/health">Health Check</a></p>
+    """Root endpoint — shows system dashboard"""
+    mode = "🟢 LIVE (Claude AI Connected)" if claude else "🟡 MOCK MODE (No API Key)"
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Digital Marketing Automation</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }}
+        .container {{ max-width: 1000px; margin: 0 auto; padding: 40px 20px; }}
+        h1 {{ font-size: 36px; background: linear-gradient(135deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px; }}
+        .subtitle {{ color: #94a3b8; font-size: 16px; margin-bottom: 32px; }}
+        .mode {{ padding: 12px 20px; border-radius: 8px; margin-bottom: 32px; font-weight: 600;
+            background: {'#065f46' if claude else '#78350f'}; border: 1px solid {'#10b981' if claude else '#f59e0b'}; }}
+        .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }}
+        .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 24px; transition: all 0.2s; }}
+        .card:hover {{ border-color: #667eea; transform: translateY(-2px); }}
+        .card h3 {{ color: #667eea; margin-bottom: 8px; font-size: 18px; }}
+        .card p {{ color: #94a3b8; font-size: 14px; margin-bottom: 16px; line-height: 1.5; }}
+        .endpoints {{ font-family: monospace; font-size: 13px; }}
+        .endpoints a {{ color: #a78bfa; text-decoration: none; display: block; padding: 4px 0; }}
+        .endpoints a:hover {{ color: #c4b5fd; }}
+        .badge {{ display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-right: 4px; }}
+        .get {{ background: #064e3b; color: #6ee7b7; }}
+        .post {{ background: #1e3a5f; color: #7dd3fc; }}
+        footer {{ text-align: center; margin-top: 48px; color: #475569; font-size: 13px; }}
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🚀 Digital Marketing Automation</h1>
+    <p class="subtitle">Powered by Claude AI + Azure — Complete Marketing on Autopilot</p>
+    <div class="mode">{mode}</div>
+
+    <div class="grid">
+        <div class="card">
+            <h3>📝 Content Engine</h3>
+            <p>AI-powered blog posts, social content, ad copy, and more</p>
+            <div class="endpoints">
+                <a href="/docs#/Content"><span class="badge post">POST</span> /api/content/blog</a>
+                <a href="/docs#/Content"><span class="badge post">POST</span> /api/content/social</a>
+                <a href="/docs#/Content"><span class="badge post">POST</span> /api/content/email</a>
+                <a href="/docs#/Content"><span class="badge post">POST</span> /api/content/ad-copy</a>
             </div>
         </div>
-        
-        <script>
-            async function generateContent() {
-                const type = document.getElementById('contentType').value;
-                const topic = document.getElementById('topic').value;
-                const instructions = document.getElementById('instructions').value;
-                const resultBox = document.getElementById('resultBox');
-                
-                if (!topic) { alert('Please enter a topic!'); return; }
-                
-                resultBox.style.display = 'block';
-                resultBox.textContent = '⏳ Generating content with Claude AI...';
-                
-                try {
-                    const response = await fetch('/api/v1/content/generate', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            content_type: type,
-                            topic: topic,
-                            instructions: instructions,
-                            tone: 'professional'
-                        })
-                    });
-                    const data = await response.json();
-                    if (data.status === 'success') {
-                        resultBox.textContent = data.content || JSON.stringify(data, null, 2);
-                    } else {
-                        resultBox.textContent = '⚠️ ' + JSON.stringify(data, null, 2);
-                    }
-                } catch (error) {
-                    resultBox.textContent = '❌ Error: ' + error.message + '\\n\\nMake sure the API is running and Claude API key is set.';
-                }
-            }
-        </script>
-    </body>
-    </html>
-    """
+
+        <div class="card">
+            <h3>🔍 SEO Optimizer</h3>
+            <p>Keyword research, site audits, and optimization recommendations</p>
+            <div class="endpoints">
+                <a href="/docs#/SEO"><span class="badge post">POST</span> /api/seo/keywords</a>
+                <a href="/docs#/SEO"><span class="badge post">POST</span> /api/seo/audit</a>
+                <a href="/docs#/SEO"><span class="badge post">POST</span> /api/seo/optimize</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>📱 Social Media</h3>
+            <p>Multi-platform post generation, scheduling, and analytics</p>
+            <div class="endpoints">
+                <a href="/docs#/Social"><span class="badge post">POST</span> /api/social/generate</a>
+                <a href="/docs#/Social"><span class="badge get">GET</span> /api/social/calendar</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>📧 Email Marketing</h3>
+            <p>Campaign creation, sequences, and performance tracking</p>
+            <div class="endpoints">
+                <a href="/docs#/Email"><span class="badge post">POST</span> /api/email/campaign</a>
+                <a href="/docs#/Email"><span class="badge post">POST</span> /api/email/sequence</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>💰 Ad Campaigns</h3>
+            <p>Ad copy generation, budget optimization, and performance</p>
+            <div class="endpoints">
+                <a href="/docs#/Ads"><span class="badge post">POST</span> /api/ads/generate</a>
+                <a href="/docs#/Ads"><span class="badge get">GET</span> /api/ads/performance</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>📊 Analytics & Reports</h3>
+            <p>AI-powered analytics, insights, and automated reporting</p>
+            <div class="endpoints">
+                <a href="/docs#/Analytics"><span class="badge get">GET</span> /api/analytics/dashboard</a>
+                <a href="/docs#/Analytics"><span class="badge get">GET</span> /api/analytics/performance</a>
+                <a href="/api/reports/daily"><span class="badge get">GET</span> /api/reports/daily</a>
+                <a href="/api/reports/weekly"><span class="badge get">GET</span> /api/reports/weekly</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>⚡ Workflows</h3>
+            <p>Run automated daily, weekly, and monthly marketing workflows</p>
+            <div class="endpoints">
+                <a href="/docs#/Workflows"><span class="badge post">POST</span> /api/workflows/daily</a>
+                <a href="/docs#/Workflows"><span class="badge post">POST</span> /api/workflows/weekly</a>
+                <a href="/docs#/Workflows"><span class="badge post">POST</span> /api/workflows/monthly</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>📚 API Documentation</h3>
+            <p>Interactive Swagger UI with all endpoints</p>
+            <div class="endpoints">
+                <a href="/docs"><span class="badge get">GET</span> /docs — Swagger UI</a>
+                <a href="/redoc"><span class="badge get">GET</span> /redoc — ReDoc</a>
+                <a href="/openapi.json"><span class="badge get">GET</span> /openapi.json</a>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Digital Marketing Automation System v1.0.0 | {config.company.name} | {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+    </footer>
+</div>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
 
 
 @app.get("/health")
-async def health():
-    return {"status": "healthy", "service": "Digital Marketing Automation API", "version": "1.0.0"}
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "mode": "live" if claude else "mock",
+        "company": config.company.name,
+        "version": "1.0.0",
+    }
 
 
+# ===== CONTENT ENDPOINTS =====
+@app.post("/api/content/blog", tags=["Content"])
+async def generate_blog_post(topic: str, keywords: str = "", tone: str = "professional"):
+    """Generate a complete SEO-optimized blog post"""
+    try:
+        result = await content_engine.generate_blog_post(
+            topic=topic,
+            keywords=keywords.split(",") if keywords else [],
+            tone=tone,
+        )
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/content/social", tags=["Content"])
+async def generate_social_post(
+    topic: str, platform: str = "linkedin", post_type: str = "educational"
+):
+    """Generate a social media post for a specific platform"""
+    try:
+        result = await content_engine.generate_social_post(
+            topic=topic, platform=platform, post_type=post_type
+        )
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/content/email", tags=["Content"])
+async def generate_email(
+    subject_topic: str, email_type: str = "newsletter", audience: str = "subscribers"
+):
+    """Generate email content"""
+    try:
+        result = await content_engine.generate_email_content(
+            topic=subject_topic, email_type=email_type, audience=audience
+        )
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/content/ad-copy", tags=["Content"])
+async def generate_ad_copy(
+    product: str, platform: str = "google", campaign_goal: str = "conversions"
+):
+    """Generate ad copy for paid campaigns"""
+    try:
+        result = await content_engine.generate_ad_copy(
+            product=product, platform=platform, goal=campaign_goal
+        )
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== SEO ENDPOINTS =====
+@app.post("/api/seo/keywords", tags=["SEO"])
+async def keyword_research(seed_keyword: str, count: int = 10):
+    """AI-powered keyword research"""
+    try:
+        result = await seo_optimizer.keyword_research(seed_keyword=seed_keyword, count=count)
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/seo/audit", tags=["SEO"])
+async def seo_audit(url: str = ""):
+    """Run SEO audit on a URL"""
+    try:
+        target_url = url or config.company.website_url
+        result = await seo_optimizer.site_audit(url=target_url)
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/seo/optimize", tags=["SEO"])
+async def optimize_content(content: str, target_keyword: str):
+    """Get SEO optimization suggestions for content"""
+    try:
+        result = await seo_optimizer.optimize_content(content=content, keyword=target_keyword)
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== SOCIAL MEDIA ENDPOINTS =====
+@app.post("/api/social/generate", tags=["Social"])
+async def generate_social_content(
+    topic: str, platforms: str = "linkedin,twitter,instagram"
+):
+    """Generate social media content for multiple platforms"""
+    try:
+        platform_list = [p.strip() for p in platforms.split(",")]
+        results = {}
+        for platform in platform_list:
+            results[platform] = await content_engine.generate_social_post(
+                topic=topic, platform=platform
+            )
+        return {"status": "success", "data": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/social/calendar", tags=["Social"])
+async def get_social_calendar():
+    """Get the social media content calendar"""
+    try:
+        calendar = await social_manager.get_content_calendar()
+        return {"status": "success", "data": calendar}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== EMAIL ENDPOINTS =====
+@app.post("/api/email/campaign", tags=["Email"])
+async def create_email_campaign(
+    name: str, subject: str, content_topic: str, audience: str = "all"
+):
+    """Create an email campaign"""
+    try:
+        result = await email_automation.create_campaign(
+            name=name, subject=subject, topic=content_topic, audience=audience
+        )
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/email/sequence", tags=["Email"])
+async def create_email_sequence(
+    name: str, trigger: str = "signup", emails_count: int = 5
+):
+    """Create an automated email sequence"""
+    try:
+        result = await email_automation.create_sequence(
+            name=name, trigger=trigger, count=emails_count
+        )
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== ADS ENDPOINTS =====
+@app.post("/api/ads/generate", tags=["Ads"])
+async def generate_ad_campaign(
+    product: str, platform: str = "google", budget: float = 100.0, goal: str = "conversions"
+):
+    """Generate a complete ad campaign"""
+    try:
+        result = await ad_manager.create_campaign(
+            product=product, platform=platform, budget=budget, goal=goal
+        )
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ads/performance", tags=["Ads"])
+async def get_ad_performance():
+    """Get ad campaign performance metrics"""
+    try:
+        result = await ad_manager.get_performance()
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== ANALYTICS ENDPOINTS =====
+@app.get("/api/analytics/dashboard", tags=["Analytics"])
+async def get_dashboard():
+    """Get marketing dashboard data"""
+    try:
+        data = await analytics_engine.get_dashboard_data()
+        return {"status": "success", "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/analytics/performance", tags=["Analytics"])
+async def get_performance(days: int = 7):
+    """Get AI-powered performance analysis"""
+    try:
+        analysis = await analytics_engine.analyze_performance(days)
+        return {"status": "success", "data": analysis}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/analytics/trends", tags=["Analytics"])
+async def get_trends(days: int = 30):
+    """Get trend analysis"""
+    try:
+        trends = await analytics_engine.analyze_trends(days)
+        return {"status": "success", "data": trends}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/analytics/funnel", tags=["Analytics"])
+async def get_funnel():
+    """Get funnel analysis"""
+    try:
+        funnel = await analytics_engine.funnel_analysis()
+        return {"status": "success", "data": funnel}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== REPORT ENDPOINTS =====
+@app.get("/api/reports/daily", tags=["Reports"])
+async def get_daily_report(format: str = "json"):
+    """Generate daily marketing report"""
+    try:
+        report = await report_generator.daily_report()
+        if format == "html":
+            html = report_generator.to_html(report)
+            return HTMLResponse(content=html)
+        elif format == "markdown":
+            md = report_generator.to_markdown(report)
+            return {"status": "success", "format": "markdown", "data": md}
+        return {"status": "success", "data": report}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/reports/weekly", tags=["Reports"])
+async def get_weekly_report(format: str = "json"):
+    """Generate weekly marketing report"""
+    try:
+        report = await report_generator.weekly_report()
+        if format == "html":
+            html = report_generator.to_html(report)
+            return HTMLResponse(content=html)
+        return {"status": "success", "data": report}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/reports/monthly", tags=["Reports"])
+async def get_monthly_report(format: str = "json"):
+    """Generate monthly marketing report"""
+    try:
+        report = await report_generator.monthly_report()
+        if format == "html":
+            html = report_generator.to_html(report)
+            return HTMLResponse(content=html)
+        return {"status": "success", "data": report}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== WORKFLOW ENDPOINTS =====
+@app.post("/api/workflows/daily", tags=["Workflows"])
+async def run_daily_workflow():
+    """Run the daily marketing automation workflow"""
+    try:
+        result = await daily_workflow.run()
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/workflows/weekly", tags=["Workflows"])
+async def run_weekly_workflow():
+    """Run the weekly marketing automation workflow"""
+    try:
+        result = await weekly_workflow.run()
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/workflows/monthly", tags=["Workflows"])
+async def run_monthly_workflow():
+    """Run the monthly marketing automation workflow"""
+    try:
+        result = await monthly_workflow.run()
+        return {"status": "success", "data": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ===== RUN SERVER =====
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run("api.main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=True)
