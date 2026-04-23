@@ -5,6 +5,7 @@ Handles all AI-powered content generation, analysis, and decision-making
 through the Anthropic Claude API.
 """
 
+import asyncio
 import json
 import logging
 from typing import Optional, Dict, List, Any
@@ -72,6 +73,22 @@ RULES:
         except Exception as e:
             logger.error(f"Claude API call failed: {str(e)}")
             raise
+
+    async def generate(
+        self,
+        prompt: str,
+        max_tokens: Optional[int] = None,
+        temperature: float = 0.7,
+        system_override: Optional[str] = None,
+    ) -> str:
+        """Async compatibility method for modules that await .generate()."""
+        return await asyncio.to_thread(
+            self._call_claude,
+            prompt,
+            system_override,
+            temperature,
+            max_tokens,
+        )
 
     def _call_claude_json(
         self,
@@ -539,6 +556,11 @@ Return as JSON:
     "risks": [
         {{"risk": "description", "mitigation": "how to handle"}}
     ]
-}}
+        }}
 """
         return self._call_claude_json(prompt, max_tokens=8000)
+
+
+# Backward-compatible aliases used across modules.
+ClaudeClient = ClaudeMarketingAI
+MarketingAIClient = ClaudeMarketingAI
