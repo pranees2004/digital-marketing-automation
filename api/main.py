@@ -190,8 +190,9 @@ async def root():
           </select>
           <label>Post Content</label>
           <textarea id="post_content" required></textarea>
-          <label>Scheduled Date & Time</label>
+          <label for="scheduled_for">Scheduled Date & Time</label>
           <input id="scheduled_for" type="datetime-local" required />
+          <p style="margin-top:6px;color:#94a3b8;font-size:.8rem;">Your local time is converted to UTC for scheduling.</p>
           <button type="submit">Schedule Post</button>
         </form>
         <ul id="scheduledPosts" class="list"></ul>
@@ -295,6 +296,7 @@ async def health_check():
 
 @app.post("/api/v1/frontend/company-profile")
 async def create_company_profile(request: CompanyOnboardingRequest):
+    recommendation_source = "fallback"
     recommendations = {
         "positioning": f"Position {request.company_name} as a trusted {request.industry.lower()} leader.",
         "seo_focus": ["solution keywords", "comparison keywords", "problem-intent long-tail keywords"],
@@ -316,6 +318,7 @@ Return JSON with keys: positioning, seo_focus, social_focus, email_focus."""
                 f"{prompt}\nRespond with valid JSON only."
             )
             recommendations = json.loads(raw_recommendations)
+            recommendation_source = "ai"
         except json.JSONDecodeError as exc:
             logger.warning(f"AI response parsing failed, returning fallback plan: {exc}")
         except Exception as exc:
@@ -328,6 +331,7 @@ Return JSON with keys: positioning, seo_focus, social_focus, email_focus."""
         "industry": request.industry,
         "target_audience": request.target_audience,
         "recommendations": recommendations,
+        "recommendation_source": recommendation_source,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     async with store_lock:
